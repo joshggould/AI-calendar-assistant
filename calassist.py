@@ -1,4 +1,7 @@
 import argparse
+import subprocess
+import os
+import calassist
 
 
 parser = argparse.ArgumentParser(description="AI Calendar Assistant")
