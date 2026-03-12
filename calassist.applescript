@@ -12,10 +12,13 @@ on run argv
         my modify_event(argv)
         
     else if command is "list_week" then
-        my list_week_events()
+        my list_week_events(argv)
         
     else if command is "check_conflict" then
         my check_conflict(argv)
+        
+    else if command is "add_reminder" then
+        my add_reminder(argv)
         
     end if
     
@@ -27,13 +30,22 @@ end run
 -- ===============================
 on add_event(argv)
     
-    set event_title to item 2 of argv
-    set start_date to date (item 3 of argv)
-    set end_date to date (item 4 of argv)
+    set cal_name to item 2 of argv
+    set event_title to item 3 of argv
+    set startTime to date (item 4 of argv)
+    set endTime to date (item 5 of argv)
     
     tell application "Calendar"
-        tell calendar "Calendar"
-            make new event with properties {summary:event_title, start date:start_date, end date:end_date}
+        tell calendar cal_name
+            set newEvent to make new event with properties {summary:event_title, start date:startTime, end date:endTime}
+            if (count of argv) >= 6 then
+                set recurrenceRule to item 6 of argv
+                if recurrenceRule is not "" then
+                    try
+                        set recurrence of newEvent to recurrenceRule
+                    end try
+                end if
+            end if
         end tell
     end tell
     
@@ -48,10 +60,11 @@ end add_event
 -- ===============================
 on delete_event(argv)
     
-    set event_title to item 2 of argv
+    set cal_name to item 2 of argv
+    set event_title to item 3 of argv
     
     tell application "Calendar"
-        tell calendar "Calendar"
+        tell calendar cal_name
             set matchingEvents to every event whose summary is event_title
             
             repeat with e in matchingEvents
@@ -71,17 +84,18 @@ end delete_event
 -- ===============================
 on modify_event(argv)
     
-    set event_title to item 2 of argv
-    set new_start to date (item 3 of argv)
-    set new_end to date (item 4 of argv)
+    set cal_name to item 2 of argv
+    set event_title to item 3 of argv
+    set newStart to date (item 4 of argv)
+    set newEnd to date (item 5 of argv)
     
     tell application "Calendar"
-        tell calendar "Calendar"
+        tell calendar cal_name
             set matchingEvents to every event whose summary is event_title
             
             repeat with e in matchingEvents
-                set start date of e to new_start
-                set end date of e to new_end
+                set start date of e to newStart
+                set end date of e to newEnd
             end repeat
         end tell
     end tell
@@ -95,14 +109,16 @@ end modify_event
 -- ===============================
 -- LIST THIS WEEK'S EVENTS
 -- ===============================
-on list_week_events()
+on list_week_events(argv)
+    
+    set cal_name to item 2 of argv
     
     set todayDate to current date
     set endOfWeek to todayDate + (7 * days)
     
     tell application "Calendar"
-        tell calendar "Calendar"
-            set weekEvents to every event whose start date ³ todayDate and start date ² endOfWeek
+        tell calendar cal_name
+            set weekEvents to every event whose start date >= todayDate and start date <= endOfWeek
             
             set outputText to ""
             
@@ -124,12 +140,13 @@ end list_week_events
 -- ===============================
 on check_conflict(argv)
     
-    set proposed_start to date (item 2 of argv)
-    set proposed_end to date (item 3 of argv)
+    set cal_name to item 2 of argv
+    set propStart to date (item 3 of argv)
+    set propEnd to date (item 4 of argv)
     
     tell application "Calendar"
-        tell calendar "Calendar"
-            set conflicts to every event whose (start date < proposed_end and end date > proposed_start)
+        tell calendar cal_name
+            set conflicts to every event whose (start date < propEnd and end date > propStart)
             
             if (count of conflicts) > 0 then
                 return "CONFLICT"
@@ -141,3 +158,30 @@ on check_conflict(argv)
     end tell
     
 end check_conflict
+
+
+
+-- ===============================
+-- ADD REMINDER (Reminders app)
+-- ===============================
+on add_reminder(argv)
+    
+    set reminder_title to item 2 of argv
+    set dueTime to missing value
+    if (count of argv) >= 3 and (item 3 of argv) is not "" then
+        set dateString to item 3 of argv
+        set dueTime to date dateString
+    end if
+    
+    tell application "Reminders"
+        set targetList to first list
+        set newReminder to make new reminder at end of targetList
+        set name of newReminder to reminder_title
+        if dueTime is not missing value then
+            set due date of newReminder to dueTime
+        end if
+    end tell
+    
+    return "Reminder added successfully"
+    
+end add_reminder
