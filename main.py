@@ -24,7 +24,6 @@ def run_applescript(*args):
 
 
 def _day_sort_key(day_label):
-    """Sort key: 'Other' last; others by parsed date for chronological order."""
     if day_label == "Other":
         return (1, datetime.max)
     try:
@@ -35,7 +34,6 @@ def _day_sort_key(day_label):
 
 
 def pretty_print_list_week(raw_output):
-    """Parse 'title | date' lines and group by day with readable formatting."""
     if not raw_output:
         print("No events this week.")
         return
@@ -47,7 +45,6 @@ def pretty_print_list_week(raw_output):
         title, date_str = line.split(" | ", 1)
         title, date_str = title.strip(), date_str.strip()
         try:
-            # AppleScript date format is often like "Thursday, March 13, 2025 at 2:00:00 PM"
             part = date_str.split(" at ")[0].strip()
             dt = datetime.strptime(part, "%A, %B %d, %Y")
             time_part = date_str.split(" at ")[1].strip() if " at " in date_str else ""
@@ -67,12 +64,12 @@ def pretty_print_list_week(raw_output):
 
 def main():
     parser = argparse.ArgumentParser(description="AI Calendar Assistant")
-    parser.add_argument("text", nargs="+", help="Natural language command (e.g. add meeting tomorrow 12-1)")
-    parser.add_argument("--calendar", "-c", default="Calendar", help="Calendar name (default: Calendar)")
+    parser.add_argument("text", nargs="+", help="Natural language command")
+    parser.add_argument("--calendar", "-c", default="Calendar", help="Calendar name")
     parser.add_argument("--no-conflict-check", action="store_true", help="Skip conflict check when adding events")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without making changes")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation for delete")
-    parser.add_argument("--duration", "-d", type=int, default=None, help="Default event duration in minutes when no time given")
+    parser.add_argument("--duration", "-d", type=int, default=None, help="Default event duration in minutes")
     args = parser.parse_args()
 
     user_input = " ".join(args.text)
@@ -91,31 +88,15 @@ def main():
     calendar = parsed.get("calendar") or args.calendar
 
     if intent == "unknown":
-        print("Could not understand command. Try: add ..., delete ..., modify ... to ..., what do i have, remind me to ...", file=sys.stderr)
+        print("Could not understand command.", file=sys.stderr)
         sys.exit(1)
 
-    # ---------------------------
-    # Dry run: show and exit
-    # ---------------------------
     if args.dry_run:
         print("Dry run — would execute:")
-        print(f"  Intent: {intent}")
-        print(f"  Parsed: {parsed}")
-        if intent == "add":
-            print(f"  Add event '{parsed['title']}' on {parsed['start']} - {parsed['end']} (calendar: {calendar})")
-        elif intent == "delete":
-            print(f"  Delete events titled '{parsed['title']}' from {calendar}")
-        elif intent == "modify":
-            print(f"  Modify '{parsed['title']}' to {parsed['start']} - {parsed['end']} in {calendar}")
-        elif intent == "list_week":
-            print(f"  List week for calendar: {calendar}")
-        elif intent == "remind":
-            print(f"  Add reminder '{parsed['title']}'" + (f" due {parsed['start']}" if parsed.get("start") else ""))
+        print(f"Intent: {intent}")
+        print(f"Parsed: {parsed}")
         return
 
-    # ---------------------------
-    # ADD
-    # ---------------------------
     if intent == "add":
         if not args.no_conflict_check:
             ok, out, err = run_applescript(
@@ -127,6 +108,7 @@ def main():
             if ok and out == "CONFLICT":
                 print("Conflict: you already have an event in this time range. Use --no-conflict-check to add anyway.", file=sys.stderr)
                 sys.exit(1)
+
         args_list = [
             "add",
             calendar,
@@ -134,8 +116,18 @@ def main():
             parsed["start"].strftime("%m/%d/%Y %I:%M %p"),
             parsed["end"].strftime("%m/%d/%Y %I:%M %p"),
         ]
-        if parsed.get("recurrence"):
+
+        manual_rrule = None
+        for token in args.text:
+            if "FREQ=" in token.upper():
+                manual_rrule = token
+                break
+
+        if manual_rrule:
+            args_list.append(manual_rrule)
+        elif parsed.get("recurrence"):
             args_list.append(parsed["recurrence"])
+
         ok, out, err = run_applescript(*args_list)
         if ok:
             print(out)
@@ -143,29 +135,51 @@ def main():
             sys.exit(1)
         return
 
-    # ---------------------------
-    # DELETE (with optional confirm)
-    # ---------------------------
     if intent == "delete":
-        if not args.yes:
-            try:
-                answer = input(f"Delete event(s) '{parsed['title']}'? [y/N] ").strip().lower()
-                if answer not in ("y", "yes"):
+        if parsed["delete_mode"] == "all":
+            if not args.yes:
+                try:
+                    answer = input(f"Delete ALL event(s) '{parsed['title']}'? [y/N] ").strip().lower()
+                    if answer not in ("y", "yes"):
+                        print("Cancelled.")
+                        return
+                except EOFError:
                     print("Cancelled.")
                     return
-            except EOFError:
-                print("Cancelled.")
-                return
-        ok, out, err = run_applescript("delete", calendar, parsed["title"])
-        if ok:
-            print(out)
-        else:
-            sys.exit(1)
-        return
 
-    # ---------------------------
-    # MODIFY
-    # ---------------------------
+            ok, out, err = run_applescript("delete_all", calendar, parsed["title"])
+            if ok:
+                print(out)
+            else:
+                sys.exit(1)
+            return
+
+        if parsed.get("start"):
+            if not args.yes:
+                try:
+                    answer = input(f"Delete ONE occurrence of '{parsed['title']}' on {parsed['start']}? [y/N] ").strip().lower()
+                    if answer not in ("y", "yes"):
+                        print("Cancelled.")
+                        return
+                except EOFError:
+                    print("Cancelled.")
+                    return
+
+            ok, out, err = run_applescript(
+                "delete_one",
+                calendar,
+                parsed["title"],
+                parsed["start"].strftime("%m/%d/%Y %I:%M %p"),
+            )
+            if ok:
+                print(out)
+            else:
+                sys.exit(1)
+            return
+
+        print("For single delete, include a date/time. Example: delete one Therapy on 04/17/2026 5:30pm", file=sys.stderr)
+        sys.exit(1)
+
     if intent == "modify":
         ok, out, err = run_applescript(
             "modify",
@@ -180,9 +194,6 @@ def main():
             sys.exit(1)
         return
 
-    # ---------------------------
-    # LIST WEEK (pretty-print)
-    # ---------------------------
     if intent == "list_week":
         ok, out, err = run_applescript("list_week", calendar)
         if ok:
@@ -191,13 +202,9 @@ def main():
             sys.exit(1)
         return
 
-    # ---------------------------
-    # REMIND (Reminders app)
-    # ---------------------------
     if intent == "remind":
         args_list = ["add_reminder", parsed["title"]]
         if parsed.get("start"):
-            # Use format AppleScript date() accepts (same as Calendar for consistency)
             args_list.append(parsed["start"].strftime("%m/%d/%Y %I:%M %p"))
         else:
             args_list.append("")
